@@ -2,25 +2,28 @@ import { expect } from "chai";
 import { ethers } from "hardhat";
 import {
   SafeProxyFactory,
-  SafeSessionModule,
   Safe,
   EntryPoint,
   TestCounter,
-} from "../../artifacts/typechain";
+} from "../artifacts/typechain";
+import {
+  Safe4337SessionKeysModule,
+  PackedUserOperationStruct,
+} from "../artifacts/typechain/contracts/Safe4337SessionKeysModule";
 import { ZeroAddress, parseEther } from "ethers";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
 import {
   buildSessionOp,
   execTransaction,
   predictSafeAddress,
-} from "../utils/safe";
-import { PackedUserOperationStruct } from "../../typechain-types/contracts/experimental/SafeSessionModule";
+} from "./utils/safe";
 import { time } from "@nomicfoundation/hardhat-network-helpers";
+import { SessionKeys4337 } from "../artifacts/typechain/contracts/SessionKeys4337";
 
-describe.only("SafeSessionModule", () => {
+describe("Safe4337SessionKeysModule", () => {
   let safeProxyFactory: SafeProxyFactory;
   let safe: Safe;
-  let safeSessionModule: SafeSessionModule;
+  let safeSessionKeysModule: Safe4337SessionKeysModule;
   let entryPoint: EntryPoint;
   let counter: TestCounter;
   let counterAddress: string;
@@ -47,16 +50,18 @@ describe.only("SafeSessionModule", () => {
     const EntryPoint = await ethers.getContractFactory("EntryPoint");
     entryPoint = (await EntryPoint.deploy()).connect(relayer);
 
-    const SafeSessionModule = await ethers.getContractFactory(
-      "SafeSessionModule"
+    const Safe4337SessionKeysModule = await ethers.getContractFactory(
+      "Safe4337SessionKeysModule"
     );
-    safeSessionModule = await SafeSessionModule.deploy(entryPoint.getAddress());
+    safeSessionKeysModule = (await Safe4337SessionKeysModule.deploy(
+      entryPoint.getAddress()
+    )) as Safe4337SessionKeysModule;
 
     const SafeModuleSetup = await ethers.getContractFactory("SafeModuleSetup");
     const safeModuleSetup = await SafeModuleSetup.deploy();
     const encodedModules = safeModuleSetup.interface.encodeFunctionData(
       "enableModules",
-      [[await safeSessionModule.getAddress()]]
+      [[await safeSessionKeysModule.getAddress()]]
     );
 
     const walletSetupData = safeSingleton.interface.encodeFunctionData(
@@ -66,7 +71,7 @@ describe.only("SafeSessionModule", () => {
         1, // threshold
         await safeModuleSetup.getAddress(),
         encodedModules, // data
-        await safeSessionModule.getAddress(), // fallback handler
+        await safeSessionKeysModule.getAddress(), // fallback handler
         ethers.ZeroAddress,
         0,
         ethers.ZeroAddress,
@@ -89,9 +94,9 @@ describe.only("SafeSessionModule", () => {
     safe = await ethers.getContractAt("Safe", expectedAddress);
 
     expect(await safe.VERSION()).to.equal("1.4.1");
-    expect(await safe.isModuleEnabled(safeSessionModule.getAddress())).to.equal(
-      true
-    );
+    expect(
+      await safe.isModuleEnabled(safeSessionKeysModule.getAddress())
+    ).to.equal(true);
 
     await entryPoint.depositTo(await safe.getAddress(), {
       value: parseEther("1.0"),
@@ -102,7 +107,7 @@ describe.only("SafeSessionModule", () => {
     it.skip("if not from the safe, it fails", async () => {
       const currentTime = Math.floor(Date.now() / 1000);
       await expect(
-        safeSessionModule
+        safeSessionKeysModule
           .connect(user)
           .addSessionKey(ethers.ZeroAddress, currentTime, currentTime + 20, [
             ethers.ZeroAddress,
@@ -111,21 +116,22 @@ describe.only("SafeSessionModule", () => {
     });
     it("with valid parameters, it succeeds", async () => {
       const timestamp = await time.latest();
-      const txData = await safeSessionModule.addSessionKey.populateTransaction(
-        user.address,
-        timestamp + 1, // valid after
-        timestamp + 20, // valid until
-        [counterAddress] // allowed destinations
-      );
+      const txData =
+        await safeSessionKeysModule.addSessionKey.populateTransaction(
+          user.address,
+          timestamp + 1, // valid after
+          timestamp + 20, // valid until
+          [counterAddress] // allowed destinations
+        );
       await expect(execTransaction(safe, user, txData)).to.emit(
-        safeSessionModule,
+        safeSessionKeysModule,
         "SessionKeyAdded"
       );
-      const session = await safeSessionModule.sessionKeys(user.address);
+      const session = await safeSessionKeysModule.sessionKeys(user.address);
       expect(session.revoked).to.be.false;
       expect(session.validAfter).to.be.equal(timestamp + 1);
       expect(session.validUntil).to.be.equal(timestamp + 20);
-      const whitelist = await safeSessionModule.whitelistDestinations(
+      const whitelist = await safeSessionKeysModule.whitelistDestinations(
         user.address,
         counterAddress
       );
@@ -133,46 +139,50 @@ describe.only("SafeSessionModule", () => {
     });
     it("if session already exists, it fails", async () => {
       const timestamp = await time.latest();
-      const txData = await safeSessionModule.addSessionKey.populateTransaction(
-        user.address,
-        timestamp + 1, // valid after
-        timestamp + 20, // valid until
-        [counterAddress] // allowed destinations
-      );
+      const txData =
+        await safeSessionKeysModule.addSessionKey.populateTransaction(
+          user.address,
+          timestamp + 1, // valid after
+          timestamp + 20, // valid until
+          [counterAddress] // allowed destinations
+        );
       await expect(execTransaction(safe, user, txData)).to.emit(
-        safeSessionModule,
+        safeSessionKeysModule,
         "SessionKeyAdded"
       );
       await expect(execTransaction(safe, user, txData)).to.be.reverted;
     });
     it("if validAfter not in the future, it fails ", async () => {
       const timestamp = await time.latest();
-      const txData = await safeSessionModule.addSessionKey.populateTransaction(
-        user.address,
-        timestamp - 10, // valid after
-        timestamp + 20, // valid until
-        [counterAddress] // allowed destinations
-      );
+      const txData =
+        await safeSessionKeysModule.addSessionKey.populateTransaction(
+          user.address,
+          timestamp - 10, // valid after
+          timestamp + 20, // valid until
+          [counterAddress] // allowed destinations
+        );
       await expect(execTransaction(safe, user, txData)).to.be.reverted;
     });
     it("if validUntil not after validAfter, it fails", async () => {
       const timestamp = await time.latest();
-      const txData = await safeSessionModule.addSessionKey.populateTransaction(
-        user.address,
-        timestamp + 100, // valid after
-        timestamp + 20, // valid until
-        [counterAddress] // allowed destinations
-      );
+      const txData =
+        await safeSessionKeysModule.addSessionKey.populateTransaction(
+          user.address,
+          timestamp + 100, // valid after
+          timestamp + 20, // valid until
+          [counterAddress] // allowed destinations
+        );
       await expect(execTransaction(safe, user, txData)).to.be.reverted;
     });
     it("if no destination provided, it fails", async () => {
       const timestamp = await time.latest();
-      const txData = await safeSessionModule.addSessionKey.populateTransaction(
-        user.address,
-        timestamp + 1, // valid after
-        timestamp + 20, // valid until
-        [] // allowed destinations
-      );
+      const txData =
+        await safeSessionKeysModule.addSessionKey.populateTransaction(
+          user.address,
+          timestamp + 1, // valid after
+          timestamp + 20, // valid until
+          [] // allowed destinations
+        );
       await expect(execTransaction(safe, user, txData)).to.be.reverted;
     });
   });
@@ -181,51 +191,57 @@ describe.only("SafeSessionModule", () => {
     it.skip("if not from the safe, it fails", async () => {});
     it("if session doesn't exist, it fails", async () => {
       const revokeSessionKeyTxData =
-        await safeSessionModule.revokeSession.populateTransaction(user.address);
+        await safeSessionKeysModule.revokeSession.populateTransaction(
+          user.address
+        );
       await expect(execTransaction(safe, user, revokeSessionKeyTxData)).to.be
         .reverted;
     });
     it("with valid parameters, it succeeds", async () => {
       const timestamp = await time.latest();
       const addSessionKeyTxData =
-        await safeSessionModule.addSessionKey.populateTransaction(
+        await safeSessionKeysModule.addSessionKey.populateTransaction(
           user.address,
           timestamp + 1, // valid after
           timestamp + 20, // valid until
           [counterAddress] // allowed destinations
         );
       await expect(execTransaction(safe, user, addSessionKeyTxData)).to.emit(
-        safeSessionModule,
+        safeSessionKeysModule,
         "SessionKeyAdded"
       );
 
       const revokeSessionKeyTxData =
-        await safeSessionModule.revokeSession.populateTransaction(user.address);
+        await safeSessionKeysModule.revokeSession.populateTransaction(
+          user.address
+        );
       await expect(execTransaction(safe, user, revokeSessionKeyTxData)).to.emit(
-        safeSessionModule,
+        safeSessionKeysModule,
         "SessionKeyRevoked"
       );
-      const session = await safeSessionModule.sessionKeys(user.address);
+      const session = await safeSessionKeysModule.sessionKeys(user.address);
       expect(session.revoked).to.be.true;
     });
     it("if session already revoked, it fails", async () => {
       const timestamp = await time.latest();
       const addSessionKeyTxData =
-        await safeSessionModule.addSessionKey.populateTransaction(
+        await safeSessionKeysModule.addSessionKey.populateTransaction(
           user.address,
           timestamp + 1, // valid after
           timestamp + 20, // valid until
           [counterAddress] // allowed destinations
         );
       await expect(execTransaction(safe, user, addSessionKeyTxData)).to.emit(
-        safeSessionModule,
+        safeSessionKeysModule,
         "SessionKeyAdded"
       );
 
       const revokeSessionKeyTxData =
-        await safeSessionModule.revokeSession.populateTransaction(user.address);
+        await safeSessionKeysModule.revokeSession.populateTransaction(
+          user.address
+        );
       await expect(execTransaction(safe, user, revokeSessionKeyTxData)).to.emit(
-        safeSessionModule,
+        safeSessionKeysModule,
         "SessionKeyRevoked"
       );
 
@@ -238,7 +254,7 @@ describe.only("SafeSessionModule", () => {
     it.skip("if not from the safe, it fails", async () => {});
     it("if session doesn't exist, it fails", async () => {
       const addWhitelistDestinationTxData =
-        await safeSessionModule.addWhitelistDestination.populateTransaction(
+        await safeSessionKeysModule.addWhitelistDestination.populateTransaction(
           user.address,
           counterAddress
         );
@@ -248,25 +264,25 @@ describe.only("SafeSessionModule", () => {
     it("if destination already whitelisted, it fails", async () => {
       const timestamp = await time.latest();
       const addSessionKeyTxData =
-        await safeSessionModule.addSessionKey.populateTransaction(
+        await safeSessionKeysModule.addSessionKey.populateTransaction(
           user.address,
           timestamp + 1, // valid after
           timestamp + 20, // valid until
           [ZeroAddress] // allowed destinations
         );
       await expect(execTransaction(safe, user, addSessionKeyTxData)).to.emit(
-        safeSessionModule,
+        safeSessionKeysModule,
         "SessionKeyAdded"
       );
 
       const addWhitelistDestinationTxData =
-        await safeSessionModule.addWhitelistDestination.populateTransaction(
+        await safeSessionKeysModule.addWhitelistDestination.populateTransaction(
           user.address,
           counterAddress
         );
       await expect(
         execTransaction(safe, user, addWhitelistDestinationTxData)
-      ).to.emit(safeSessionModule, "WhitelistedDestinationAdded");
+      ).to.emit(safeSessionKeysModule, "WhitelistedDestinationAdded");
 
       await expect(execTransaction(safe, user, addWhitelistDestinationTxData))
         .to.be.reverted;
@@ -274,26 +290,26 @@ describe.only("SafeSessionModule", () => {
     it("with valid parameters, it succeeds", async () => {
       const timestamp = await time.latest();
       const addSessionKeyTxData =
-        await safeSessionModule.addSessionKey.populateTransaction(
+        await safeSessionKeysModule.addSessionKey.populateTransaction(
           user.address,
           timestamp + 1, // valid after
           timestamp + 20, // valid until
           [ZeroAddress] // allowed destinations
         );
       await expect(execTransaction(safe, user, addSessionKeyTxData)).to.emit(
-        safeSessionModule,
+        safeSessionKeysModule,
         "SessionKeyAdded"
       );
 
       const addWhitelistDestinationTxData =
-        await safeSessionModule.addWhitelistDestination.populateTransaction(
+        await safeSessionKeysModule.addWhitelistDestination.populateTransaction(
           user.address,
           counterAddress
         );
       await expect(
         execTransaction(safe, user, addWhitelistDestinationTxData)
-      ).to.emit(safeSessionModule, "WhitelistedDestinationAdded");
-      const whitelisted = await safeSessionModule.whitelistDestinations(
+      ).to.emit(safeSessionKeysModule, "WhitelistedDestinationAdded");
+      const whitelisted = await safeSessionKeysModule.whitelistDestinations(
         user.address,
         counterAddress
       );
@@ -305,7 +321,7 @@ describe.only("SafeSessionModule", () => {
     it.skip("if not from the safe, it fails", async () => {});
     it("if session doesn't exist, it fails", async () => {
       const removeWhitelistDestinationTxData =
-        await safeSessionModule.removeWhitelistDestination.populateTransaction(
+        await safeSessionKeysModule.removeWhitelistDestination.populateTransaction(
           user.address,
           counterAddress
         );
@@ -316,40 +332,40 @@ describe.only("SafeSessionModule", () => {
     it("with valid parameters, it succeeds", async () => {
       const timestamp = await time.latest();
       const addSessionKeyTxData =
-        await safeSessionModule.addSessionKey.populateTransaction(
+        await safeSessionKeysModule.addSessionKey.populateTransaction(
           user.address,
           timestamp + 1, // valid after
           timestamp + 20, // valid until
           [ZeroAddress] // allowed destinations
         );
       await expect(execTransaction(safe, user, addSessionKeyTxData)).to.emit(
-        safeSessionModule,
+        safeSessionKeysModule,
         "SessionKeyAdded"
       );
 
       const addWhitelistDestinationTxData =
-        await safeSessionModule.addWhitelistDestination.populateTransaction(
+        await safeSessionKeysModule.addWhitelistDestination.populateTransaction(
           user.address,
           counterAddress
         );
       await expect(
         execTransaction(safe, user, addWhitelistDestinationTxData)
-      ).to.emit(safeSessionModule, "WhitelistedDestinationAdded");
-      let whitelisted = await safeSessionModule.whitelistDestinations(
+      ).to.emit(safeSessionKeysModule, "WhitelistedDestinationAdded");
+      let whitelisted = await safeSessionKeysModule.whitelistDestinations(
         user.address,
         counterAddress
       );
       expect(whitelisted).to.be.true;
 
       const removeWhitelistDestinationTxData =
-        await safeSessionModule.removeWhitelistDestination.populateTransaction(
+        await safeSessionKeysModule.removeWhitelistDestination.populateTransaction(
           user.address,
           counterAddress
         );
       await expect(
         execTransaction(safe, user, removeWhitelistDestinationTxData)
-      ).to.emit(safeSessionModule, "WhitelistedDestinationRemoved");
-      whitelisted = await safeSessionModule.whitelistDestinations(
+      ).to.emit(safeSessionKeysModule, "WhitelistedDestinationRemoved");
+      whitelisted = await safeSessionKeysModule.whitelistDestinations(
         user.address,
         counterAddress
       );
@@ -358,19 +374,19 @@ describe.only("SafeSessionModule", () => {
     it("if destination not whitelisted, it fails", async () => {
       const timestamp = await time.latest();
       const addSessionKeyTxData =
-        await safeSessionModule.addSessionKey.populateTransaction(
+        await safeSessionKeysModule.addSessionKey.populateTransaction(
           user.address,
           timestamp + 1, // valid after
           timestamp + 20, // valid until
           [ZeroAddress] // allowed destinations
         );
       await expect(execTransaction(safe, user, addSessionKeyTxData)).to.emit(
-        safeSessionModule,
+        safeSessionKeysModule,
         "SessionKeyAdded"
       );
 
       const removeWhitelistDestinationTxData =
-        await safeSessionModule.removeWhitelistDestination.populateTransaction(
+        await safeSessionKeysModule.removeWhitelistDestination.populateTransaction(
           user.address,
           counterAddress
         );
@@ -393,7 +409,7 @@ describe.only("SafeSessionModule", () => {
     it("if session revoked, it fails", async () => {
       const timestamp = await time.latest();
       const addSessionKeyTxData =
-        await safeSessionModule.addSessionKey.populateTransaction(
+        await safeSessionKeysModule.addSessionKey.populateTransaction(
           user.address,
           timestamp + 1, // valid after
           timestamp + 20, // valid until
@@ -401,7 +417,9 @@ describe.only("SafeSessionModule", () => {
         );
       await execTransaction(safe, user, addSessionKeyTxData);
       const revokeSessionKeyTxData =
-        await safeSessionModule.revokeSession.populateTransaction(user.address);
+        await safeSessionKeysModule.revokeSession.populateTransaction(
+          user.address
+        );
       await execTransaction(safe, user, revokeSessionKeyTxData);
 
       const sessionOp = await interactWithCounter(user, 0n);
@@ -414,7 +432,7 @@ describe.only("SafeSessionModule", () => {
     it("if session not started, it fails", async () => {
       const timestamp = await time.latest();
       const addSessionKeyTxData =
-        await safeSessionModule.addSessionKey.populateTransaction(
+        await safeSessionKeysModule.addSessionKey.populateTransaction(
           user.address,
           timestamp + 1000, // valid after
           timestamp + 2000, // valid until
@@ -432,7 +450,7 @@ describe.only("SafeSessionModule", () => {
     it("if session expired, it fails", async () => {
       const timestamp = await time.latest();
       const addSessionKeyTxData =
-        await safeSessionModule.addSessionKey.populateTransaction(
+        await safeSessionKeysModule.addSessionKey.populateTransaction(
           user.address,
           timestamp + 100, // valid after
           timestamp + 200, // valid until
@@ -452,7 +470,7 @@ describe.only("SafeSessionModule", () => {
     it("if allowAllDestinations true, if address(0) not whitelisted, it fails", async () => {
       const timestamp = await time.latest();
       const addSessionKeyTxData =
-        await safeSessionModule.addSessionKey.populateTransaction(
+        await safeSessionKeysModule.addSessionKey.populateTransaction(
           user.address,
           timestamp + 1, // valid after
           timestamp + 20, // valid until
@@ -470,7 +488,7 @@ describe.only("SafeSessionModule", () => {
     it("if allowAllDestinations false, if destination not whitelisted, it fails", async () => {
       const timestamp = await time.latest();
       const addSessionKeyTxData =
-        await safeSessionModule.addSessionKey.populateTransaction(
+        await safeSessionKeysModule.addSessionKey.populateTransaction(
           user.address,
           timestamp + 1, // valid after
           timestamp + 20, // valid until
@@ -487,12 +505,13 @@ describe.only("SafeSessionModule", () => {
     });
     it("with valid parameters, it succeeds", async () => {
       const timestamp = await time.latest();
-      const txData = await safeSessionModule.addSessionKey.populateTransaction(
-        user.address,
-        timestamp + 1, // valid after
-        timestamp + 20, // valid until
-        [counterAddress] //[ethers.ZeroAddress] // allowed destinations
-      );
+      const txData =
+        await safeSessionKeysModule.addSessionKey.populateTransaction(
+          user.address,
+          timestamp + 1, // valid after
+          timestamp + 20, // valid until
+          [counterAddress] //[ethers.ZeroAddress] // allowed destinations
+        );
       await execTransaction(safe, user, txData);
 
       // prepare user operation
@@ -516,14 +535,14 @@ describe.only("SafeSessionModule", () => {
     nonce: bigint,
     allowAllDestinations = false
   ): Promise<PackedUserOperationStruct> => {
-    const call: SafeSessionModule.CallStruct = {
+    const call: SessionKeys4337.CallStruct = {
       target: counterAddress,
       data: (await counter.count.populateTransaction()).data,
       allowAllDestinations,
     };
     return await buildSessionOp(
       safe,
-      safeSessionModule,
+      safeSessionKeysModule,
       call,
       nonce,
       signer.address

@@ -1,20 +1,14 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 pragma solidity 0.8.23;
 
-import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
-import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
-import {ModuleManager} from "@safe-global/safe-contracts/contracts/base/ModuleManager.sol";
-import {Safe, Enum} from "@safe-global/safe-contracts/contracts/Safe.sol";
 import {HandlerContext} from "@safe-global/safe-contracts/contracts/handler/HandlerContext.sol";
 import {CompatibilityFallbackHandler} from "@safe-global/safe-contracts/contracts/handler/CompatibilityFallbackHandler.sol";
 import {IAccount} from "@account-abstraction/contracts/interfaces/IAccount.sol";
 import {PackedUserOperation} from "@account-abstraction/contracts/interfaces/PackedUserOperation.sol";
 import {_packValidationData} from "@account-abstraction/contracts/core/Helpers.sol";
 import {UserOperationLib} from "@account-abstraction/contracts/core/UserOperationLib.sol";
-
-import "hardhat/console.sol";
-
-//import {ISafe} from "./interfaces/Safe.sol";
+import {ISafe} from "./interfaces/Safe.sol";
+import {SessionKeys4337} from "./SessionKeys4337.sol";
 
 /**
  * @title Safe4337Module - An extension to the Safe contract that implements the ERC4337 interface.
@@ -28,10 +22,11 @@ import "hardhat/console.sol";
  *      - Replay protection is handled by the entry point.
  * @custom:security-contact bounty@safe.global
  */
-contract SafeSessionModule is
+contract Safe4337SessionKeysModule is
     IAccount,
     HandlerContext,
-    CompatibilityFallbackHandler
+    CompatibilityFallbackHandler,
+    SessionKeys4337
 {
     using UserOperationLib for PackedUserOperation;
 
@@ -85,33 +80,6 @@ contract SafeSessionModule is
         address entryPoint;
     }
 
-    /// @dev Session keys to destinations
-    mapping(address => mapping(address => bool)) public whitelistDestinations;
-
-    /// @dev Session keys to sessions
-    mapping(address => Session) public sessionKeys;
-
-    struct Session {
-        address account;
-        uint48 validAfter;
-        uint48 validUntil;
-        bool revoked;
-    }
-
-    event SessionKeyAdded(address indexed sessionKey, address indexed account);
-    event SessionKeyRevoked(
-        address indexed sessionKey,
-        address indexed account
-    );
-    event WhitelistedDestinationAdded(
-        address indexed sessionKey,
-        address indexed destination
-    );
-    event WhitelistedDestinationRemoved(
-        address indexed sessionKey,
-        address indexed destination
-    );
-
     /**
      * @notice An error indicating that the entry point used when deploying a new module instance is invalid.
      */
@@ -142,11 +110,6 @@ contract SafeSessionModule is
      * data. When bubbling up revert data is desirable, `executeUserOpWithErrorString` should be used instead.
      */
     error ExecutionFailed();
-
-    error InvalidSessionKey(address sessionKey);
-    error InvalidSignature(address sessionKey);
-    error InvalidSessionInterval(address sessionKey);
-    error RevokedSession(address sessionKey);
 
     /**
      * @notice The address of the EntryPoint contract supported by this module.
@@ -213,11 +176,11 @@ contract SafeSessionModule is
         if (missingAccountFunds != 0) {
             // We intentionally ignore errors in paying the missing account funds, as the entry point is responsible for
             // verifying the prefund has been paid. This behaviour matches the reference base account implementation.
-            Safe(safeAddress).execTransactionFromModule(
+            ISafe(safeAddress).execTransactionFromModule(
                 SUPPORTED_ENTRYPOINT,
                 missingAccountFunds,
                 "",
-                Enum.Operation.Call
+                0 // Enum.Operation.Call
             );
         }
     }
@@ -233,10 +196,10 @@ contract SafeSessionModule is
         address to,
         uint256 value,
         bytes memory data,
-        Enum.Operation operation
+        uint8 operation
     ) external onlySupportedEntryPoint {
         if (
-            !ModuleManager(msg.sender).execTransactionFromModule(
+            !ISafe(msg.sender).execTransactionFromModule(
                 to,
                 value,
                 data,
@@ -245,133 +208,6 @@ contract SafeSessionModule is
         ) {
             revert ExecutionFailed();
         }
-    }
-
-    struct Call {
-        // The target address for the account to call.
-        address target;
-        // The calldata for the call.
-        bytes data;
-        // Whether to allow all destinations
-        bool allowAllDestinations;
-    }
-
-    function executeWithSessionKey(
-        Call calldata call,
-        address sessionKey
-    ) external /*returns (bytes[] memory)*/ {
-        Session memory session = sessionKeys[sessionKey];
-
-        if (
-            block.timestamp < session.validAfter ||
-            block.timestamp > session.validUntil
-        ) {
-            revert InvalidSessionInterval(sessionKey);
-        }
-        if (session.revoked) {
-            revert RevokedSession(sessionKey);
-        }
-
-        if (call.allowAllDestinations) {
-            require(
-                whitelistDestinations[sessionKey][address(0)],
-                "All destinations not whitelisted"
-            );
-        } else {
-            require(
-                whitelistDestinations[sessionKey][call.target],
-                "Destination not whitelisted"
-            );
-        }
-
-        if (
-            !ModuleManager(session.account).execTransactionFromModule(
-                call.target,
-                0,
-                call.data,
-                Enum.Operation.Call
-            )
-        ) {
-            revert ExecutionFailed();
-        }
-    }
-
-    /// @notice Create a new session
-    /// @param sessionKey The session key
-    /// @param validAfter The start time of the session
-    /// @param validUntil The end time of the session
-    /// @param destinations The destinations that are whitelisted for the session
-    function addSessionKey(
-        address sessionKey,
-        uint48 validAfter,
-        uint48 validUntil,
-        address[] calldata destinations
-    ) public {
-        Session storage session = sessionKeys[sessionKey];
-        require(session.validAfter == 0, "Session already exists");
-        require(
-            validAfter >= block.timestamp,
-            "validAfter at least from the current time"
-        );
-        require(validAfter < validUntil, "Start time must be before end time");
-        require(destinations.length > 0, "Must have at least one destination");
-
-        session.account = msg.sender;
-        session.validAfter = validAfter;
-        session.validUntil = validUntil;
-        for (uint256 i = 0; i < destinations.length; i++) {
-            whitelistDestinations[sessionKey][destinations[i]] = true;
-        }
-
-        emit SessionKeyAdded(sessionKey, msg.sender);
-    }
-
-    /// @notice Revoke a session
-    /// @param sessionKey The session key
-    function revokeSession(address sessionKey) external {
-        Session storage session = sessionKeys[sessionKey];
-        if (msg.sender != session.account) revert InvalidCaller();
-        require(session.validAfter != 0, "Session does not exist");
-        require(!session.revoked, "Session has already been revoked");
-        session.revoked = true;
-
-        emit SessionKeyRevoked(sessionKey, msg.sender);
-    }
-
-    /// @notice Add a destination to the whitelist
-    /// @param sessionKey The session key
-    /// @param destination The destination to add to the whitelist
-    function addWhitelistDestination(
-        address sessionKey,
-        address destination
-    ) external {
-        Session storage session = sessionKeys[sessionKey];
-        if (msg.sender != session.account) revert InvalidCaller();
-        require(session.validAfter != 0, "Session does not exist");
-        require(
-            !whitelistDestinations[sessionKey][destination],
-            "Destination already whitelisted"
-        );
-        whitelistDestinations[sessionKey][destination] = true;
-        emit WhitelistedDestinationAdded(sessionKey, destination);
-    }
-
-    /// @notice Remove a destination from the whitelist
-    /// @param sessionKey The session key
-    /// @param destination The destination to remove from the whitelist
-    function removeWhitelistDestination(
-        address sessionKey,
-        address destination
-    ) external {
-        Session storage session = sessionKeys[sessionKey];
-        if (msg.sender != session.account) revert InvalidCaller();
-        require(session.validAfter != 0, "Session does not exist");
-        require(
-            whitelistDestinations[sessionKey][destination],
-            "Destination not whitelisted"
-        );
-        whitelistDestinations[sessionKey][destination] = false;
-        emit WhitelistedDestinationRemoved(sessionKey, destination);
     }
 
     /**
@@ -385,9 +221,9 @@ contract SafeSessionModule is
         address to,
         uint256 value,
         bytes memory data,
-        Enum.Operation operation
+        uint8 operation
     ) external onlySupportedEntryPoint {
-        (bool success, bytes memory returnData) = ModuleManager(msg.sender)
+        (bool success, bytes memory returnData) = ISafe(msg.sender)
             .execTransactionFromModuleReturnData(to, value, data, operation);
         if (!success) {
             // solhint-disable-next-line no-inline-assembly
@@ -443,7 +279,7 @@ contract SafeSessionModule is
             bytes calldata signatures
         ) = _getSafeOp(userOp);
         try
-            Safe(payable(userOp.sender)).checkSignatures(
+            ISafe(payable(userOp.sender)).checkSignatures(
                 keccak256(operationData),
                 operationData,
                 signatures
@@ -453,38 +289,6 @@ contract SafeSessionModule is
             validationData = _packValidationData(false, validUntil, validAfter);
         } catch {
             validationData = _packValidationData(true, validUntil, validAfter);
-        }
-    }
-
-    function _validateSessionKeySignature(
-        PackedUserOperation calldata userOp,
-        bytes32 userOpHash
-    ) internal pure returns (uint256 validationData) {
-        /*
-        (
-            bytes memory operationData,
-            uint48 validAfter,
-            uint48 validUntil,
-            bytes calldata signatures
-        ) = _getSafeOp(userOp);
-        */
-
-        (, address sessionKey) = abi.decode(
-            userOp.callData[4:],
-            (Call, address)
-        );
-
-        (address recoveredSig, ECDSA.RecoverError err, ) = ECDSA.tryRecover(
-            MessageHashUtils.toEthSignedMessageHash(userOpHash),
-            userOp.signature
-        );
-
-        if (err != ECDSA.RecoverError.NoError) {
-            validationData = uint256(1);
-        }
-
-        if (sessionKey != recoveredSig) {
-            validationData = uint256(1);
         }
     }
 
