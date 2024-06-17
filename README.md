@@ -1,4 +1,4 @@
-# Modular Account Abstraction Contracts
+# Modular Safe 4337 Contracts
 
 This repository contains an alternative to the official *Safe4337Module* module.
 `Safe4337SessionKeysModule` is this modified module with with hooks for session keys.
