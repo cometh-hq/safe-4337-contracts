@@ -220,11 +220,11 @@ describe("Safe4337SessionKeysModule", () => {
   describe("When revoking a session", async () => {
     it.skip("if not from the safe, it fails", async () => {});
     it("if session doesn't exist, it fails", async () => {
-      const revokeSessionKeyTxData =
-        await safeSessionKeysModule.revokeSession.populateTransaction(
+      const revokeSessionKeyKeyTxData =
+        await safeSessionKeysModule.revokeSessionKey.populateTransaction(
           user.address
         );
-      await expect(execTransaction(safe, user, revokeSessionKeyTxData)).to.be
+      await expect(execTransaction(safe, user, revokeSessionKeyKeyTxData)).to.be
         .reverted;
     });
     it("with valid parameters, it succeeds", async () => {
@@ -242,14 +242,13 @@ describe("Safe4337SessionKeysModule", () => {
         "SessionKeyAdded"
       );
 
-      const revokeSessionKeyTxData =
-        await safeSessionKeysModule.revokeSession.populateTransaction(
+      const revokeSessionKeyKeyTxData =
+        await safeSessionKeysModule.revokeSessionKey.populateTransaction(
           user.address
         );
-      await expect(execTransaction(safe, user, revokeSessionKeyTxData)).to.emit(
-        safeSessionKeysModule,
-        "SessionKeyRevoked"
-      );
+      await expect(
+        execTransaction(safe, user, revokeSessionKeyKeyTxData)
+      ).to.emit(safeSessionKeysModule, "SessionKeyRevoked");
       const session = await safeSessionKeysModule.sessionKeys(user.address);
       expect(session.account).to.eq(ZeroAddress);
 
@@ -272,16 +271,15 @@ describe("Safe4337SessionKeysModule", () => {
         "SessionKeyAdded"
       );
 
-      const revokeSessionKeyTxData =
-        await safeSessionKeysModule.revokeSession.populateTransaction(
+      const revokeSessionKeyKeyTxData =
+        await safeSessionKeysModule.revokeSessionKey.populateTransaction(
           user.address
         );
-      await expect(execTransaction(safe, user, revokeSessionKeyTxData)).to.emit(
-        safeSessionKeysModule,
-        "SessionKeyRevoked"
-      );
+      await expect(
+        execTransaction(safe, user, revokeSessionKeyKeyTxData)
+      ).to.emit(safeSessionKeysModule, "SessionKeyRevoked");
 
-      await expect(execTransaction(safe, user, revokeSessionKeyTxData)).to.be
+      await expect(execTransaction(safe, user, revokeSessionKeyKeyTxData)).to.be
         .reverted;
     });
   });
@@ -461,11 +459,11 @@ describe("Safe4337SessionKeysModule", () => {
           [functionSelectorAllowAll] // allowed function selectors
         );
       await execTransaction(safe, user, addSessionKeyTxData);
-      const revokeSessionKeyTxData =
-        await safeSessionKeysModule.revokeSession.populateTransaction(
+      const revokeSessionKeyKeyTxData =
+        await safeSessionKeysModule.revokeSessionKey.populateTransaction(
           user.address
         );
-      await execTransaction(safe, user, revokeSessionKeyTxData);
+      await execTransaction(safe, user, revokeSessionKeyKeyTxData);
 
       const sessionOp = await interactWithCounter(user, 0n);
       const opHash = await entryPoint.getUserOpHash(sessionOp);

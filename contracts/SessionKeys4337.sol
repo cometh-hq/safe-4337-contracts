@@ -188,7 +188,7 @@ contract SessionKeys4337 {
      * @notice Revoke a session
      * @param sessionKey The session key
      */
-    function revokeSession(address sessionKey) external {
+    function revokeSessionKey(address sessionKey) external {
         Session memory session = sessionKeys[sessionKey];
         if (msg.sender != session.account) revert InvalidSessionKeyCaller();
         require(session.validAfter != 0, "Session does not exist");
