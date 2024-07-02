@@ -6,19 +6,32 @@ import {Safe, Enum} from "@safe-global/safe-contracts/contracts/Safe.sol";
 import {ModuleManager} from "@safe-global/safe-contracts/contracts/base/ModuleManager.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 contract SessionKeys4337 {
-    /// @dev Session keys to destinations
-    mapping(address => mapping(address => bool)) public whitelistDestinations;
+    using EnumerableSet for EnumerableSet.AddressSet;
+
+    bytes4 public constant FUNCTION_SELECTOR_ALLOW_ALL = 0xffffffff;
+
+    /// @dev Session keys to destinations with optional functinn selector restriction
+    mapping(address => mapping(address => bytes4)) public whitelistDestinations;
 
     /// @dev Session keys to sessions
     mapping(address => Session) public sessionKeys;
+
+    /// @dev list of sessions keys per safe wallet
+    mapping(address => EnumerableSet.AddressSet) private safeSessionKeys;
 
     struct Session {
         address account;
         uint48 validAfter;
         uint48 validUntil;
-        bool revoked;
+    }
+    struct SessionWithKey {
+        address account;
+        uint48 validAfter;
+        uint48 validUntil;
+        address key;
     }
 
     event SessionKeyAdded(address indexed sessionKey, address indexed account);
@@ -38,7 +51,6 @@ contract SessionKeys4337 {
     error InvalidSessionKey(address sessionKey);
     error InvalidSignature(address sessionKey);
     error InvalidSessionInterval(address sessionKey);
-    error RevokedSession(address sessionKey);
 
     /**
      * @notice An error indicating that the caller does not match the Safe in the corresponding user operation.
@@ -77,19 +89,30 @@ contract SessionKeys4337 {
         ) {
             revert InvalidSessionInterval(sessionKey);
         }
-        if (session.revoked) {
-            revert RevokedSession(sessionKey);
-        }
 
+        bytes4 selector = bytes4(call.data);
         if (call.allowAllDestinations) {
+            bytes4 whitelistedSelector = whitelistDestinations[sessionKey][
+                address(0)
+            ];
             require(
-                whitelistDestinations[sessionKey][address(0)],
+                whitelistedSelector != 0,
                 "All destinations not whitelisted"
             );
-        } else {
             require(
-                whitelistDestinations[sessionKey][call.target],
-                "Destination not whitelisted"
+                whitelistedSelector == FUNCTION_SELECTOR_ALLOW_ALL ||
+                    whitelistedSelector == selector,
+                "Non whitelisted selector"
+            );
+        } else {
+            bytes4 whitelistedSelector = whitelistDestinations[sessionKey][
+                call.target
+            ];
+            require(whitelistedSelector != 0, "Destination not whitelisted");
+            require(
+                whitelistedSelector == FUNCTION_SELECTOR_ALLOW_ALL ||
+                    whitelistedSelector == selector,
+                "Non whitelisted selector"
             );
         }
 
@@ -105,18 +128,37 @@ contract SessionKeys4337 {
         }
     }
 
+    function getSessionKeys(
+        address safe
+    ) external view returns (SessionWithKey[] memory sessions) {
+        uint256 numberOfSessionKeys = safeSessionKeys[safe].length();
+        sessions = new SessionWithKey[](numberOfSessionKeys);
+        for (uint i = 0; i < numberOfSessionKeys; i++) {
+            address sessionKey = safeSessionKeys[safe].at(i);
+            Session memory session = sessionKeys[sessionKey];
+            sessions[i] = SessionWithKey(
+                session.account,
+                session.validAfter,
+                session.validUntil,
+                sessionKey
+            );
+        }
+    }
+
     /**
      * @notice Create a new session
      * @param sessionKey The session key
      * @param validAfter The start time of the session
      * @param validUntil The end time of the session
      * @param destinations The destinations that are whitelisted for the session
+     * @param selectors The allowed functions selectors -- use `FUNCTION_SELECTOR_ALLOW_ALL` eventually
      */
     function addSessionKey(
         address sessionKey,
         uint48 validAfter,
         uint48 validUntil,
-        address[] calldata destinations
+        address[] calldata destinations,
+        bytes4[] calldata selectors
     ) public {
         Session storage session = sessionKeys[sessionKey];
         require(session.validAfter == 0, "Session already exists");
@@ -126,13 +168,18 @@ contract SessionKeys4337 {
         );
         require(validAfter < validUntil, "Start time must be before end time");
         require(destinations.length > 0, "Must have at least one destination");
+        require(
+            destinations.length == selectors.length,
+            "Each destination must have a selector"
+        );
 
         session.account = msg.sender;
         session.validAfter = validAfter;
         session.validUntil = validUntil;
         for (uint256 i = 0; i < destinations.length; i++) {
-            whitelistDestinations[sessionKey][destinations[i]] = true;
+            whitelistDestinations[sessionKey][destinations[i]] = selectors[i];
         }
+        safeSessionKeys[msg.sender].add(sessionKey);
 
         emit SessionKeyAdded(sessionKey, msg.sender);
     }
@@ -142,11 +189,11 @@ contract SessionKeys4337 {
      * @param sessionKey The session key
      */
     function revokeSession(address sessionKey) external {
-        Session storage session = sessionKeys[sessionKey];
+        Session memory session = sessionKeys[sessionKey];
         if (msg.sender != session.account) revert InvalidSessionKeyCaller();
         require(session.validAfter != 0, "Session does not exist");
-        require(!session.revoked, "Session has already been revoked");
-        session.revoked = true;
+        delete sessionKeys[sessionKey];
+        safeSessionKeys[msg.sender].remove(sessionKey);
 
         emit SessionKeyRevoked(sessionKey, msg.sender);
     }
@@ -158,16 +205,17 @@ contract SessionKeys4337 {
      */
     function addWhitelistDestination(
         address sessionKey,
-        address destination
+        address destination,
+        bytes4 selector
     ) external {
         Session storage session = sessionKeys[sessionKey];
         if (msg.sender != session.account) revert InvalidSessionKeyCaller();
         require(session.validAfter != 0, "Session does not exist");
         require(
-            !whitelistDestinations[sessionKey][destination],
+            whitelistDestinations[sessionKey][destination] == 0,
             "Destination already whitelisted"
         );
-        whitelistDestinations[sessionKey][destination] = true;
+        whitelistDestinations[sessionKey][destination] = selector;
         emit WhitelistedDestinationAdded(sessionKey, destination);
     }
 
@@ -184,10 +232,10 @@ contract SessionKeys4337 {
         if (msg.sender != session.account) revert InvalidSessionKeyCaller();
         require(session.validAfter != 0, "Session does not exist");
         require(
-            whitelistDestinations[sessionKey][destination],
+            whitelistDestinations[sessionKey][destination] != 0,
             "Destination not whitelisted"
         );
-        whitelistDestinations[sessionKey][destination] = false;
+        delete whitelistDestinations[sessionKey][destination];
         emit WhitelistedDestinationRemoved(sessionKey, destination);
     }
 
