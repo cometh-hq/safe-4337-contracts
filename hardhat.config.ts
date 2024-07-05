@@ -15,7 +15,8 @@ import "hardhat-deploy";
 
 require("dotenv").config();
 
-if(process.env.PRIVATE_KEY === undefined) throw new Error("PRIVATE_KEY is not set");
+if (process.env.PRIVATE_KEY === undefined)
+  throw new Error("PRIVATE_KEY is not set");
 
 const config: HardhatUserConfig = {
   solidity: {
@@ -210,6 +211,11 @@ const config: HardhatUserConfig = {
       accounts:
         process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
     },
+    arbitrum: {
+      url: "https://arbitrum-mainnet.infura.io/v3/2e1346349a5d4a24aeba9dee6c7b20b5",
+      accounts:
+        process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
+    },
     /*
     base_production: {
       url: "https://base-mainnet.g.alchemy.com/v2/" + process.env.INFURA_ID,
@@ -223,7 +229,7 @@ const config: HardhatUserConfig = {
     },
     */
   },
-  /*
+
   etherscan: {
     // Your API key for Etherscan
     // Obtain one at https://etherscan.io/
@@ -293,7 +299,7 @@ const config: HardhatUserConfig = {
       },
     ],
   },
-  */
+
   typechain: {
     outDir: "artifacts/typechain",
     target: "ethers-v6",
