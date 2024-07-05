@@ -10,6 +10,13 @@ dotenv.config();
 import { HardhatUserConfig } from "hardhat/config";
 import "@nomicfoundation/hardhat-toolbox";
 
+import "@nomiclabs/hardhat-ethers";
+import "hardhat-deploy";
+
+require("dotenv").config();
+
+if(process.env.PRIVATE_KEY === undefined) throw new Error("PRIVATE_KEY is not set");
+
 const config: HardhatUserConfig = {
   solidity: {
     compilers: [
@@ -191,11 +198,19 @@ const config: HardhatUserConfig = {
       accounts:
         process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
     },
+   
     arbitrum_sepolia_production: {
       url: "https://arbitrum-sepolia.infura.io/v3/" + process.env.INFURA_ID,
       accounts:
         process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
     },
+     */
+    arbitrum_sepolia: {
+      url: "https://arb-sepolia.g.alchemy.com/v2/j2u34Yef5hzCe4OZ5KJb-EjF8oQenPTT",
+      accounts:
+        process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
+    },
+    /*
     base_production: {
       url: "https://base-mainnet.g.alchemy.com/v2/" + process.env.INFURA_ID,
       accounts:
