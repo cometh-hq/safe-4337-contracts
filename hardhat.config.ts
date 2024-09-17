@@ -1,21 +1,15 @@
-/*
-import * as dotenv from "dotenv";
-import "@nomicfoundation/hardhat-toolbox";
-import "@nomicfoundation/hardhat-chai-matchers";
-import "hardhat-deploy";
-//import { getDeterministicDeployment } from "@cometh/contracts-factory";
 
-dotenv.config();
-*/
 import { HardhatUserConfig } from "hardhat/config";
 import "@nomicfoundation/hardhat-toolbox";
 
 import "@nomiclabs/hardhat-ethers";
 import "hardhat-deploy";
 
+import { getDeterministicDeployment } from "@cometh/contracts-factory";
+
 require("dotenv").config();
 
-if(process.env.PRIVATE_KEY === undefined) throw new Error("PRIVATE_KEY is not set");
+if (process.env.PRIVATE_KEY === undefined) throw new Error("PRIVATE_KEY is not set");
 
 const config: HardhatUserConfig = {
   solidity: {
@@ -26,7 +20,6 @@ const config: HardhatUserConfig = {
       { version: "0.5.17" },
     ],
   },
-  /*
   deterministicDeployment: (network: string) => {
     const networkName = process.env.HARDHAT_NETWORK ?? "";
     const env: string = (() => {
@@ -41,7 +34,6 @@ const config: HardhatUserConfig = {
     })();
     return getDeterministicDeployment(env)(network);
   },
-  */
   networks: {
     hardhat: {
       // required to deploy safes
@@ -207,6 +199,11 @@ const config: HardhatUserConfig = {
      */
     arbitrum_sepolia: {
       url: "https://arb-sepolia.g.alchemy.com/v2/j2u34Yef5hzCe4OZ5KJb-EjF8oQenPTT",
+      accounts:
+        process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
+    },
+    base_sepolia: {
+      url: "https://sepolia.base.org",
       accounts:
         process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
     },

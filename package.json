@@ -41,6 +41,7 @@
     }
   },
   "dependencies": {
+    "@cometh/contracts-factory": "^1.2.11",
     "dotenv": "^16.4.5",
     "hardhat-deploy": "^0.12.4"
   }
