@@ -191,18 +191,24 @@ const config: HardhatUserConfig = {
         process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
     },
    
-    arbitrum_sepolia_production: {
-      url: "https://arbitrum-sepolia.infura.io/v3/" + process.env.INFURA_ID,
-      accounts:
-        process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
-    },
+   
      */
     arbitrum_sepolia: {
       url: "https://arb-sepolia.g.alchemy.com/v2/j2u34Yef5hzCe4OZ5KJb-EjF8oQenPTT",
       accounts:
         process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
     },
+    arbitrum_sepolia_production: {
+      url: "https://arb-sepolia.g.alchemy.com/v2/j2u34Yef5hzCe4OZ5KJb-EjF8oQenPTT",
+      accounts:
+        process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
+    },
     base_sepolia: {
+      url: "https://sepolia.base.org",
+      accounts:
+        process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
+    },
+    base_sepolia_production: {
       url: "https://sepolia.base.org",
       accounts:
         process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
@@ -213,11 +219,7 @@ const config: HardhatUserConfig = {
       accounts:
         process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
     },
-    base_sepolia_production: {
-      url: "https://base-sepolia.g.alchemy.com/v2/" + process.env.INFURA_ID,
-      accounts:
-        process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
-    },
+   
     */
   },
   /*
